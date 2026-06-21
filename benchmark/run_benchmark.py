@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Benchmark harness for the forward-looking-guidance optimization assignment.
+Benchmark harness for the forward-looking-guidance host-side optimizations.
 
-Measures the four optimizations (A: str.translate + join, B: streaming JSONL,
-C: engine refactor dispatch overhead, D: lru_cache) on the *before* and *after*
-copies under ``src/``. Everything runs on CPU with synthetic data; no GPU, no
-network, no model weights are touched.
+Measures the four changes (str.translate + join in the normalizer, streaming JSONL,
+the engine refactor's dispatch overhead, and the lru_cache) on the *before* and
+*after* copies under ``src/``. Everything runs on CPU with synthetic data; no GPU,
+no network, no model weights are touched.
 
 Outputs (written under ``results/``):
   * env.json                — measurement environment

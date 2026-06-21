@@ -1,23 +1,8 @@
 # Optimized functions — before/after unified diff (common.py)
 
 --- src/before/common.py	2026-06-21 13:59:15.288329162 +0900
-+++ src/after/common.py	2026-06-21 14:02:42.886982046 +0900
-@@ -6,6 +6,14 @@
-   * One vLLM engine per GPU (tensor_parallel_size=1); the test set is sharded across
-     the available GPUs for throughput.
-   * Qwen3-8B runs with extended reasoning disabled (enable_thinking=False).
-+
-+NOTE (optimized version):
-+  This file is the "after" copy used in the optimization assignment. The public API is
-+  unchanged; the changes are (A) str.translate + precompiled regex in the answer
-+  normalizer and a join-based ``docs_to_str``, (B) a streaming ``iter_jsonl`` generator,
-+  (C) the monolithic ``LLMEngine`` split into a config dataclass + backend strategies
-+  selected through a registry, and (D) ``timed`` / ``retry`` decorators plus an
-+  ``lru_cache`` on the normalizer. See ``report/`` for the rationale and measurements.
- """
- from __future__ import annotations
- 
-@@ -16,9 +24,11 @@
++++ src/after/common.py	2026-06-21 20:53:41.540133205 +0900
+@@ -16,9 +16,11 @@
  import json
  import time
  import string
@@ -30,12 +15,12 @@
  
  
  def parse_obj(s: str):
-@@ -36,12 +46,70 @@
+@@ -36,12 +38,70 @@
      return None
  
  
 +# ----------------------------------------------------------------------------------
-+# (D) Decorators — cross-cutting policy split out of the core research logic.
++# Decorators — cross-cutting policy split out of the core logic.
 +# ----------------------------------------------------------------------------------
 +def timed(fn: Callable) -> Callable:
 +    """Accumulate wall-clock time of ``fn`` on ``fn.total_time`` / ``fn.n_calls``.
@@ -85,7 +70,7 @@
 +
 +
  # ---- metrics / normalization ------------------------------------------------------
-+# (A) Precompute the punctuation deletion table and the substitution patterns once at
++# Precompute the punctuation deletion table and the substitution patterns once at
 +# import time instead of rebuilding ``set(string.punctuation)`` and recompiling the
 +# regexes on every call. ``str.translate`` runs the whole punctuation pass in C.
 +_PUNCT_TABLE = str.maketrans("", "", string.punctuation)
@@ -103,7 +88,7 @@
  
  
  def white_space_fix(text):
-@@ -49,15 +117,19 @@
+@@ -49,15 +109,19 @@
  
  
  def remove_punc(text):
@@ -120,12 +105,12 @@
  
 +@functools.lru_cache(maxsize=1 << 18)
  def normalize_answer(s):
-+    # (D) Memoized: the same gold answers (aliases, yes/no, by-hop re-scoring) are
++    # Memoized: the same gold answers (aliases, yes/no, by-hop re-scoring) are
 +    # normalized many times across an evaluation run, so caching collapses the repeats.
      return white_space_fix(remove_articles(remove_punc(lower(s))))
  
  
-@@ -83,8 +155,8 @@
+@@ -83,8 +147,8 @@
  def total_f1_score(predictions, ground_truths):
      n = len(predictions)
      tf1 = tp = tr = 0.0
@@ -136,18 +121,18 @@
          tf1 += f1; tp += p; tr += r
      return (tf1 / n if n else 0.0, tp / n if n else 0.0, tr / n if n else 0.0)
  
-@@ -113,14 +185,22 @@
+@@ -113,14 +177,22 @@
  # ----------------------------------------------------------------------------------
  # Data IO
  # ----------------------------------------------------------------------------------
 -def read_jsonl(path: str | Path) -> list[dict]:
 -    rows = []
 +def iter_jsonl(path: str | Path) -> Iterator[dict]:
-+    """(B) Stream a JSONL file row by row.
++    """Stream a JSONL file row by row.
 +
 +    Yields one parsed object at a time so callers that only fold over the rows
 +    (counting, deduping, scoring) never hold the whole file in memory. ``read_jsonl``
-+    is kept as the eager list version for the few call sites that genuinely index.
++    is the eager list version for the few call sites that genuinely index.
 +    """
      with open(path, "r", encoding="utf-8") as f:
          for line in f:
@@ -163,19 +148,16 @@
  
  
  def write_jsonl(path: str | Path, rows: list[dict]) -> None:
-@@ -140,29 +220,63 @@
+@@ -140,29 +212,60 @@
  
  
  # ----------------------------------------------------------------------------------
 -# LLM engine: local models via vLLM (one per GPU), or an OpenAI-hosted model via the API.
-+# (C) LLM engine: a config dataclass + backend strategies behind a small registry.
-+#
-+# The original ``LLMEngine`` carried two transports (OpenAI API vs. local vLLM) inside
-+# one class, branching on ``self.is_openai`` in ``__init__``, ``chat`` and ``complete``.
-+# Here the sampling knobs live in an immutable ``GenerationConfig``, each transport is
-+# its own ``Backend`` with a single responsibility, and ``build_backend`` selects one
-+# by model id. Adding a transport is a new class + one registry line, with no edits to
-+# the dispatch methods. Heavy imports (vllm / openai / transformers) stay lazy.
++# LLM engine: a config dataclass + backend strategies behind a small registry.
++# Sampling knobs live in an immutable ``GenerationConfig``; each transport (OpenAI API,
++# local vLLM) is its own ``Backend`` with a single responsibility, and ``build_backend``
++# selects one by model id. Adding a transport is a new class + one registry line, with no
++# edits to the dispatch methods. Heavy imports (vllm / openai / transformers) stay lazy.
  # ----------------------------------------------------------------------------------
  MODEL_PATH = os.environ.get("MODEL_PATH", os.environ.get("QWEN3_PATH", "Qwen/Qwen3-8B"))
  
@@ -246,7 +228,7 @@
          os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
          from vllm import LLM, SamplingParams  # noqa
          from transformers import AutoTokenizer
-@@ -183,6 +297,56 @@
+@@ -183,6 +286,56 @@
              disable_log_stats=True,
          )
  
@@ -303,7 +285,7 @@
      def chat(
          self,
          messages_list: list[list[dict]],
-@@ -196,21 +360,9 @@
+@@ -196,21 +349,9 @@
          """Batched chat generation. Qwen3 thinking is disabled by default."""
          if not messages_list:
              return []
@@ -328,7 +310,7 @@
  
      def complete(
          self,
-@@ -223,20 +375,9 @@
+@@ -223,20 +364,9 @@
          """Raw text completion (no chat template) — used by SelfAsk few-shot scaffolding."""
          if not prompts:
              return []
@@ -352,7 +334,7 @@
  
  
  # ----------------------------------------------------------------------------------
-@@ -271,10 +412,10 @@
+@@ -271,10 +401,9 @@
  
  
  def docs_to_str(results: list[dict]) -> str:
@@ -360,9 +342,8 @@
 -    for res in results:
 -        s += f"Title: {res['title']}\n{res['text']}\n\n"
 -    return s
-+    # (A) Build the block with a single join instead of repeated ``s += ...``; the
-+    # latter re-allocates the growing string and degrades toward O(n^2) as the passage
-+    # list grows.
++    # Build the block with a single join instead of repeated ``s += ...``; the latter
++    # re-allocates the growing string and degrades toward O(n^2) as the passage list grows.
 +    return "".join(f"Title: {res['title']}\n{res['text']}\n\n" for res in results)
  
  

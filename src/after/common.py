@@ -6,14 +6,6 @@ Design:
   * One vLLM engine per GPU (tensor_parallel_size=1); the test set is sharded across
     the available GPUs for throughput.
   * Qwen3-8B runs with extended reasoning disabled (enable_thinking=False).
-
-NOTE (optimized version):
-  This file is the "after" copy used in the optimization assignment. The public API is
-  unchanged; the changes are (A) str.translate + precompiled regex in the answer
-  normalizer and a join-based ``docs_to_str``, (B) a streaming ``iter_jsonl`` generator,
-  (C) the monolithic ``LLMEngine`` split into a config dataclass + backend strategies
-  selected through a registry, and (D) ``timed`` / ``retry`` decorators plus an
-  ``lru_cache`` on the normalizer. See ``report/`` for the rationale and measurements.
 """
 from __future__ import annotations
 
@@ -47,7 +39,7 @@ def parse_obj(s: str):
 
 
 # ----------------------------------------------------------------------------------
-# (D) Decorators — cross-cutting policy split out of the core research logic.
+# Decorators — cross-cutting policy split out of the core logic.
 # ----------------------------------------------------------------------------------
 def timed(fn: Callable) -> Callable:
     """Accumulate wall-clock time of ``fn`` on ``fn.total_time`` / ``fn.n_calls``.
@@ -97,7 +89,7 @@ def retry(times: int = 3, exceptions: tuple = (Exception,), base_delay: float = 
 
 
 # ---- metrics / normalization ------------------------------------------------------
-# (A) Precompute the punctuation deletion table and the substitution patterns once at
+# Precompute the punctuation deletion table and the substitution patterns once at
 # import time instead of rebuilding ``set(string.punctuation)`` and recompiling the
 # regexes on every call. ``str.translate`` runs the whole punctuation pass in C.
 _PUNCT_TABLE = str.maketrans("", "", string.punctuation)
@@ -128,7 +120,7 @@ def lower(text):
 
 @functools.lru_cache(maxsize=1 << 18)
 def normalize_answer(s):
-    # (D) Memoized: the same gold answers (aliases, yes/no, by-hop re-scoring) are
+    # Memoized: the same gold answers (aliases, yes/no, by-hop re-scoring) are
     # normalized many times across an evaluation run, so caching collapses the repeats.
     return white_space_fix(remove_articles(remove_punc(lower(s))))
 
@@ -186,11 +178,11 @@ ORDINARY_TOPK = 5
 # Data IO
 # ----------------------------------------------------------------------------------
 def iter_jsonl(path: str | Path) -> Iterator[dict]:
-    """(B) Stream a JSONL file row by row.
+    """Stream a JSONL file row by row.
 
     Yields one parsed object at a time so callers that only fold over the rows
     (counting, deduping, scoring) never hold the whole file in memory. ``read_jsonl``
-    is kept as the eager list version for the few call sites that genuinely index.
+    is the eager list version for the few call sites that genuinely index.
     """
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -220,14 +212,11 @@ def faiss_path(dataset: str) -> Path:
 
 
 # ----------------------------------------------------------------------------------
-# (C) LLM engine: a config dataclass + backend strategies behind a small registry.
-#
-# The original ``LLMEngine`` carried two transports (OpenAI API vs. local vLLM) inside
-# one class, branching on ``self.is_openai`` in ``__init__``, ``chat`` and ``complete``.
-# Here the sampling knobs live in an immutable ``GenerationConfig``, each transport is
-# its own ``Backend`` with a single responsibility, and ``build_backend`` selects one
-# by model id. Adding a transport is a new class + one registry line, with no edits to
-# the dispatch methods. Heavy imports (vllm / openai / transformers) stay lazy.
+# LLM engine: a config dataclass + backend strategies behind a small registry.
+# Sampling knobs live in an immutable ``GenerationConfig``; each transport (OpenAI API,
+# local vLLM) is its own ``Backend`` with a single responsibility, and ``build_backend``
+# selects one by model id. Adding a transport is a new class + one registry line, with no
+# edits to the dispatch methods. Heavy imports (vllm / openai / transformers) stay lazy.
 # ----------------------------------------------------------------------------------
 MODEL_PATH = os.environ.get("MODEL_PATH", os.environ.get("QWEN3_PATH", "Qwen/Qwen3-8B"))
 
@@ -412,9 +401,8 @@ class Retriever:
 
 
 def docs_to_str(results: list[dict]) -> str:
-    # (A) Build the block with a single join instead of repeated ``s += ...``; the
-    # latter re-allocates the growing string and degrades toward O(n^2) as the passage
-    # list grows.
+    # Build the block with a single join instead of repeated ``s += ...``; the latter
+    # re-allocates the growing string and degrades toward O(n^2) as the passage list grows.
     return "".join(f"Title: {res['title']}\n{res['text']}\n\n" for res in results)
 
 
