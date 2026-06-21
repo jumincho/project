@@ -1,6 +1,6 @@
 # Forward-Looking Guidance RAG 코드 최적화
 
-석사 연구에서 사용 중인 멀티홉 QA 코드(**Forward-Looking Guidance**, 계획 기반 반복 검색 RAG)의
+연구에서 사용 중인 멀티홉 QA 코드(**Forward-Looking Guidance**, 계획 기반 반복 검색 RAG)의
 **호스트 측 공통 유틸리티**를 대상으로, 수업에서 배운 자료구조 · 반복자/제너레이터 · 클래스 설계 ·
 데코레이터 기법을 적용해 구조와 성능을 개선한 과제 저장소입니다.
 
