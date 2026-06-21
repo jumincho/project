@@ -1,0 +1,369 @@
+# Optimized functions — before/after unified diff (common.py)
+
+--- src/before/common.py	2026-06-21 13:59:15.288329162 +0900
++++ src/after/common.py	2026-06-21 14:02:42.886982046 +0900
+@@ -6,6 +6,14 @@
+   * One vLLM engine per GPU (tensor_parallel_size=1); the test set is sharded across
+     the available GPUs for throughput.
+   * Qwen3-8B runs with extended reasoning disabled (enable_thinking=False).
++
++NOTE (optimized version):
++  This file is the "after" copy used in the optimization assignment. The public API is
++  unchanged; the changes are (A) str.translate + precompiled regex in the answer
++  normalizer and a join-based ``docs_to_str``, (B) a streaming ``iter_jsonl`` generator,
++  (C) the monolithic ``LLMEngine`` split into a config dataclass + backend strategies
++  selected through a registry, and (D) ``timed`` / ``retry`` decorators plus an
++  ``lru_cache`` on the normalizer. See ``report/`` for the rationale and measurements.
+ """
+ from __future__ import annotations
+ 
+@@ -16,9 +24,11 @@
+ import json
+ import time
+ import string
++import functools
+ from collections import Counter
++from dataclasses import dataclass
+ from pathlib import Path
+-from typing import Any
++from typing import Any, Callable, Iterator, Protocol
+ 
+ 
+ def parse_obj(s: str):
+@@ -36,12 +46,70 @@
+     return None
+ 
+ 
++# ----------------------------------------------------------------------------------
++# (D) Decorators — cross-cutting policy split out of the core research logic.
++# ----------------------------------------------------------------------------------
++def timed(fn: Callable) -> Callable:
++    """Accumulate wall-clock time of ``fn`` on ``fn.total_time`` / ``fn.n_calls``.
++
++    Kept side-effect free for the caller (returns the original value) so it can wrap
++    hot functions during profiling without changing behaviour. ``functools.wraps``
++    preserves the wrapped function's name / docstring / signature metadata.
++    """
++    @functools.wraps(fn)
++    def wrapper(*args, **kwargs):
++        t0 = time.perf_counter()
++        try:
++            return fn(*args, **kwargs)
++        finally:
++            wrapper.total_time += time.perf_counter() - t0
++            wrapper.n_calls += 1
++    wrapper.total_time = 0.0
++    wrapper.n_calls = 0
++    return wrapper
++
++
++def retry(times: int = 3, exceptions: tuple = (Exception,), base_delay: float = 0.5,
++          backoff: float = 2.0):
++    """Retry ``fn`` up to ``times`` attempts with exponential backoff.
++
++    Parameterized decorator for unstable I/O (the OpenAI API call below). The final
++    failure is re-raised unchanged so callers still see the real exception; the
++    wrapped function's signature/metadata is preserved with ``functools.wraps``.
++    """
++    def deco(fn: Callable) -> Callable:
++        @functools.wraps(fn)
++        def wrapper(*args, **kwargs):
++            delay = base_delay
++            last = None
++            for attempt in range(1, times + 1):
++                try:
++                    return fn(*args, **kwargs)
++                except exceptions as e:  # noqa: PERF203
++                    last = e
++                    if attempt == times:
++                        raise
++                    time.sleep(delay)
++                    delay *= backoff
++            raise last  # pragma: no cover
++        return wrapper
++    return deco
++
++
+ # ---- metrics / normalization ------------------------------------------------------
++# (A) Precompute the punctuation deletion table and the substitution patterns once at
++# import time instead of rebuilding ``set(string.punctuation)`` and recompiling the
++# regexes on every call. ``str.translate`` runs the whole punctuation pass in C.
++_PUNCT_TABLE = str.maketrans("", "", string.punctuation)
++_QUOTE_RE = re.compile(r"'|`|,|’|\\|´")
++_ARTICLE_RE = re.compile(r"\b(a|an|the)\b")
++
++
+ def remove_articles(text):
+     text = text.replace('_', ' ')
+     text = text.replace('"', '')
+-    text = re.sub(r"'|`|,|’|\\|´", '', text)
+-    return re.sub(r'\b(a|an|the)\b', ' ', text)
++    text = _QUOTE_RE.sub('', text)
++    return _ARTICLE_RE.sub(' ', text)
+ 
+ 
+ def white_space_fix(text):
+@@ -49,15 +117,19 @@
+ 
+ 
+ def remove_punc(text):
+-    exclude = set(string.punctuation)
+-    return ''.join(ch for ch in text if ch not in exclude)
++    # Equivalent to ``''.join(ch for ch in text if ch not in set(string.punctuation))``
++    # but the deletion table is built once and applied in a single C-level pass.
++    return text.translate(_PUNCT_TABLE)
+ 
+ 
+ def lower(text):
+     return text.lower().strip()
+ 
+ 
++@functools.lru_cache(maxsize=1 << 18)
+ def normalize_answer(s):
++    # (D) Memoized: the same gold answers (aliases, yes/no, by-hop re-scoring) are
++    # normalized many times across an evaluation run, so caching collapses the repeats.
+     return white_space_fix(remove_articles(remove_punc(lower(s))))
+ 
+ 
+@@ -83,8 +155,8 @@
+ def total_f1_score(predictions, ground_truths):
+     n = len(predictions)
+     tf1 = tp = tr = 0.0
+-    for i in range(n):
+-        f1, p, r = f1_score(predictions[i], ground_truths[i])
++    for pred, gold in zip(predictions, ground_truths):
++        f1, p, r = f1_score(pred, gold)
+         tf1 += f1; tp += p; tr += r
+     return (tf1 / n if n else 0.0, tp / n if n else 0.0, tr / n if n else 0.0)
+ 
+@@ -113,14 +185,22 @@
+ # ----------------------------------------------------------------------------------
+ # Data IO
+ # ----------------------------------------------------------------------------------
+-def read_jsonl(path: str | Path) -> list[dict]:
+-    rows = []
++def iter_jsonl(path: str | Path) -> Iterator[dict]:
++    """(B) Stream a JSONL file row by row.
++
++    Yields one parsed object at a time so callers that only fold over the rows
++    (counting, deduping, scoring) never hold the whole file in memory. ``read_jsonl``
++    is kept as the eager list version for the few call sites that genuinely index.
++    """
+     with open(path, "r", encoding="utf-8") as f:
+         for line in f:
+             line = line.strip()
+             if line:
+-                rows.append(json.loads(line))
+-    return rows
++                yield json.loads(line)
++
++
++def read_jsonl(path: str | Path) -> list[dict]:
++    return list(iter_jsonl(path))
+ 
+ 
+ def write_jsonl(path: str | Path, rows: list[dict]) -> None:
+@@ -140,29 +220,63 @@
+ 
+ 
+ # ----------------------------------------------------------------------------------
+-# LLM engine: local models via vLLM (one per GPU), or an OpenAI-hosted model via the API.
++# (C) LLM engine: a config dataclass + backend strategies behind a small registry.
++#
++# The original ``LLMEngine`` carried two transports (OpenAI API vs. local vLLM) inside
++# one class, branching on ``self.is_openai`` in ``__init__``, ``chat`` and ``complete``.
++# Here the sampling knobs live in an immutable ``GenerationConfig``, each transport is
++# its own ``Backend`` with a single responsibility, and ``build_backend`` selects one
++# by model id. Adding a transport is a new class + one registry line, with no edits to
++# the dispatch methods. Heavy imports (vllm / openai / transformers) stay lazy.
+ # ----------------------------------------------------------------------------------
+ MODEL_PATH = os.environ.get("MODEL_PATH", os.environ.get("QWEN3_PATH", "Qwen/Qwen3-8B"))
+ 
+ 
+-class LLMEngine:
+-    def __init__(
+-        self,
+-        model_path: str = MODEL_PATH,
+-        max_model_len: int = 4096,
+-        gpu_memory_utilization: float = 0.80,  # leave headroom for the Contriever encoder
+-        max_num_seqs: int = 128,
+-        seed: int = 0,
+-    ):
+-        self.model_path = model_path
+-        # OpenAI-hosted models (e.g. gpt-4o-mini) use the API; all others run locally via vLLM.
+-        self.is_openai = model_path.startswith("gpt-") or model_path.startswith("openai/")
+-        if self.is_openai:
+-            from openai import OpenAI
+-            self.client = OpenAI()
+-            self.openai_model = model_path.split("/", 1)[-1]
+-            self.is_qwen3 = False
+-            return
++@dataclass(frozen=True, slots=True)
++class GenerationConfig:
++    """Immutable sampling parameters shared by chat and completion calls."""
++    temperature: float = 1.0
++    max_tokens: int = 512
++    top_p: float = 0.95
++    think: bool = False
++    stop: tuple[str, ...] | None = None
++    seed: int | None = None
++
++
++class Backend(Protocol):
++    """The contract every transport implements (structural typing, no inheritance)."""
++    def chat(self, messages_list: list[list[dict]], cfg: GenerationConfig) -> list[str]: ...
++    def complete(self, prompts: list[str], cfg: GenerationConfig) -> list[str]: ...
++
++
++class OpenAIBackend:
++    """OpenAI-hosted models (e.g. gpt-4o-mini) via the chat-completions API."""
++
++    def __init__(self, model_path: str, **_ignored):
++        from openai import OpenAI
++        self.client = OpenAI()
++        self.openai_model = model_path.split("/", 1)[-1]
++
++    @retry(times=3, base_delay=0.5)
++    def _one(self, messages, cfg: GenerationConfig) -> str:
++        r = self.client.chat.completions.create(
++            model=self.openai_model, messages=messages, temperature=cfg.temperature,
++            max_tokens=cfg.max_tokens, top_p=cfg.top_p,
++            stop=list(cfg.stop) if cfg.stop else None)
++        return r.choices[0].message.content or ""
++
++    def chat(self, messages_list, cfg):
++        return [self._one(m, cfg) for m in messages_list]
++
++    def complete(self, prompts, cfg):
++        return [self._one([{"role": "user", "content": p}], cfg) for p in prompts]
++
++
++class VLLMBackend:
++    """Local models via vLLM (one engine per GPU)."""
++
++    def __init__(self, model_path: str, max_model_len: int = 4096,
++                 gpu_memory_utilization: float = 0.80, max_num_seqs: int = 128, seed: int = 0):
+         os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+         from vllm import LLM, SamplingParams  # noqa
+         from transformers import AutoTokenizer
+@@ -183,6 +297,56 @@
+             disable_log_stats=True,
+         )
+ 
++    def _sampling(self, cfg: GenerationConfig):
++        return self.SamplingParams(
++            temperature=cfg.temperature, top_p=cfg.top_p, max_tokens=cfg.max_tokens,
++            stop=list(cfg.stop) if cfg.stop else None, seed=cfg.seed,
++        )
++
++    def chat(self, messages_list, cfg):
++        sp = self._sampling(cfg)
++        kw = {"enable_thinking": cfg.think} if self.is_qwen3 else {}
++        texts = self.tokenizer.apply_chat_template(
++            messages_list, tokenize=False, add_generation_prompt=True, **kw)
++        outs = self.llm.generate(texts, sp, use_tqdm=False)
++        return [o.outputs[0].text for o in outs]
++
++    def complete(self, prompts, cfg):
++        outs = self.llm.generate(prompts, self._sampling(cfg), use_tqdm=False)
++        return [o.outputs[0].text for o in outs]
++
++
++# registry: (predicate on model id) -> backend factory. Order matters; first match wins.
++BACKEND_REGISTRY: list[tuple[Callable[[str], bool], Callable[..., Backend]]] = [
++    (lambda mp: mp.startswith("gpt-") or mp.startswith("openai/"), OpenAIBackend),
++    (lambda mp: True, VLLMBackend),  # default: anything else runs locally
++]
++
++
++def build_backend(model_path: str, **engine_kw) -> Backend:
++    for matches, factory in BACKEND_REGISTRY:
++        if matches(model_path):
++            return factory(model_path, **engine_kw)
++    raise ValueError(f"no backend for model id: {model_path}")  # pragma: no cover
++
++
++class LLMEngine:
++    """Thin facade kept for API compatibility: delegates to the selected backend."""
++
++    def __init__(
++        self,
++        model_path: str = MODEL_PATH,
++        max_model_len: int = 4096,
++        gpu_memory_utilization: float = 0.80,  # leave headroom for the Contriever encoder
++        max_num_seqs: int = 128,
++        seed: int = 0,
++    ):
++        self.model_path = model_path
++        self.backend = build_backend(
++            model_path, max_model_len=max_model_len,
++            gpu_memory_utilization=gpu_memory_utilization,
++            max_num_seqs=max_num_seqs, seed=seed)
++
+     def chat(
+         self,
+         messages_list: list[list[dict]],
+@@ -196,21 +360,9 @@
+         """Batched chat generation. Qwen3 thinking is disabled by default."""
+         if not messages_list:
+             return []
+-        if self.is_openai:
+-            return [self._openai_chat(m, temperature, max_tokens, top_p, stop)
+-                    for m in messages_list]
+-        sp = self.SamplingParams(
+-            temperature=temperature, top_p=top_p, max_tokens=max_tokens,
+-            stop=stop, seed=seed,
+-        )
+-        kw = {}
+-        if self.is_qwen3:
+-            kw["enable_thinking"] = think
+-        texts = self.tokenizer.apply_chat_template(
+-            messages_list, tokenize=False, add_generation_prompt=True, **kw
+-        )
+-        outs = self.llm.generate(texts, sp, use_tqdm=False)
+-        return [o.outputs[0].text for o in outs]
++        cfg = GenerationConfig(temperature, max_tokens, top_p, think,
++                               tuple(stop) if stop else None, seed)
++        return self.backend.chat(messages_list, cfg)
+ 
+     def complete(
+         self,
+@@ -223,20 +375,9 @@
+         """Raw text completion (no chat template) — used by SelfAsk few-shot scaffolding."""
+         if not prompts:
+             return []
+-        if self.is_openai:
+-            return [self._openai_chat([{"role": "user", "content": p}],
+-                                      temperature, max_tokens, top_p, stop) for p in prompts]
+-        sp = self.SamplingParams(
+-            temperature=temperature, top_p=top_p, max_tokens=max_tokens, stop=stop,
+-        )
+-        outs = self.llm.generate(prompts, sp, use_tqdm=False)
+-        return [o.outputs[0].text for o in outs]
+-
+-    def _openai_chat(self, messages, temperature, max_tokens, top_p, stop):
+-        r = self.client.chat.completions.create(
+-            model=self.openai_model, messages=messages, temperature=temperature,
+-            max_tokens=max_tokens, top_p=top_p, stop=stop)
+-        return r.choices[0].message.content or ""
++        cfg = GenerationConfig(temperature, max_tokens, top_p, False,
++                               tuple(stop) if stop else None, None)
++        return self.backend.complete(prompts, cfg)
+ 
+ 
+ # ----------------------------------------------------------------------------------
+@@ -271,10 +412,10 @@
+ 
+ 
+ def docs_to_str(results: list[dict]) -> str:
+-    s = ""
+-    for res in results:
+-        s += f"Title: {res['title']}\n{res['text']}\n\n"
+-    return s
++    # (A) Build the block with a single join instead of repeated ``s += ...``; the
++    # latter re-allocates the growing string and degrades toward O(n^2) as the passage
++    # list grows.
++    return "".join(f"Title: {res['title']}\n{res['text']}\n\n" for res in results)
+ 
+ 
+ # ----------------------------------------------------------------------------------

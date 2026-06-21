@@ -1,0 +1,10 @@
+GitHub 저장소 주소:
+https://github.com/jumincho/project
+
+저장소 구성:
+- 최적화 전 코드: src/before/
+- 최적화 후 코드: src/after/   (공개 API 동일)
+- 벤치마크: benchmark/run_benchmark.py, benchmark/make_figures.py
+- 측정 결과: results/ (benchmark_results.csv, env.json, equivalence.json, figures/)
+- 보고서: report/report.pdf
+- 실행 방법 및 전후 비교 안내: README.md

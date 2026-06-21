@@ -1,0 +1,12 @@
+{
+  "random_strings": 20000,
+  "total_comparisons": 60500,
+  "mismatches": 0,
+  "functions_checked": [
+    "normalize_answer",
+    "exact_match_score",
+    "f1_score",
+    "docs_to_str"
+  ],
+  "note": "before vs after produce byte-identical outputs on every random input"
+}

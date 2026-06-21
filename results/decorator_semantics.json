@@ -1,0 +1,5 @@
+{
+  "retry_recovers": true,
+  "retry_reraises": true,
+  "wraps_keeps_name": true
+}

@@ -1,0 +1,57 @@
+experiment,variant,input_size,metric,mean,std,min,n_repeats,unit,notes
+A1_normalize,before/low_rep,2000,time,0.0073337,1.81545e-05,0.00731242,11,s,"set+genexpr, no cache"
+A1_normalize,after_translate/low_rep,2000,time,0.00456094,7.62691e-05,0.00451422,11,s,"translate+precompiled regex, no cache"
+A1_normalize,after_cached/low_rep,2000,time,0.00274249,6.51387e-06,0.00273079,11,s,translate + lru_cache (cold->warm)
+A1_normalize,before/low_rep,8000,time,0.029026,0.000359881,0.0286574,11,s,"set+genexpr, no cache"
+A1_normalize,after_translate/low_rep,8000,time,0.0178358,0.000319332,0.0176736,11,s,"translate+precompiled regex, no cache"
+A1_normalize,after_cached/low_rep,8000,time,0.0111075,0.000132429,0.0110175,11,s,translate + lru_cache (cold->warm)
+A1_normalize,before/low_rep,32000,time,0.115681,0.00140452,0.113489,11,s,"set+genexpr, no cache"
+A1_normalize,after_translate/low_rep,32000,time,0.0715576,0.000224349,0.0710905,11,s,"translate+precompiled regex, no cache"
+A1_normalize,after_cached/low_rep,32000,time,0.0442034,0.00229595,0.0431328,11,s,translate + lru_cache (cold->warm)
+A1_normalize,before/low_rep,128000,time,0.462659,0.0019399,0.460739,11,s,"set+genexpr, no cache"
+A1_normalize,after_translate/low_rep,128000,time,0.290576,0.00155378,0.287389,11,s,"translate+precompiled regex, no cache"
+A1_normalize,after_cached/low_rep,128000,time,0.166778,0.00213829,0.16479,11,s,translate + lru_cache (cold->warm)
+A1_normalize,before/high_rep,2000,time,0.00712596,1.07733e-05,0.00710552,11,s,"set+genexpr, no cache"
+A1_normalize,after_translate/high_rep,2000,time,0.00443024,8.71056e-06,0.00442054,11,s,"translate+precompiled regex, no cache"
+A1_normalize,after_cached/high_rep,2000,time,0.000333515,7.06538e-06,0.000328526,11,s,translate + lru_cache (cold->warm)
+A1_normalize,before/high_rep,8000,time,0.0281048,9.54994e-05,0.0279808,11,s,"set+genexpr, no cache"
+A1_normalize,after_translate/high_rep,8000,time,0.0174363,7.76742e-05,0.0173438,11,s,"translate+precompiled regex, no cache"
+A1_normalize,after_cached/high_rep,8000,time,0.00127501,3.1053e-06,0.00127094,11,s,translate + lru_cache (cold->warm)
+A1_normalize,before/high_rep,32000,time,0.113711,0.000524597,0.113251,11,s,"set+genexpr, no cache"
+A1_normalize,after_translate/high_rep,32000,time,0.0700445,0.000103035,0.0699052,11,s,"translate+precompiled regex, no cache"
+A1_normalize,after_cached/high_rep,32000,time,0.00525964,1.20987e-05,0.00523896,11,s,translate + lru_cache (cold->warm)
+A1_normalize,before/high_rep,128000,time,0.458843,0.00177802,0.455546,11,s,"set+genexpr, no cache"
+A1_normalize,after_translate/high_rep,128000,time,0.285433,0.000448849,0.284681,11,s,"translate+precompiled regex, no cache"
+A1_normalize,after_cached/high_rep,128000,time,0.0232324,9.22757e-05,0.0231494,11,s,translate + lru_cache (cold->warm)
+A2_docs_to_str,before,50,time,1.1473e-05,8.11312e-07,1.074e-05,11,s,s += in loop
+A2_docs_to_str,after,50,time,1.20603e-05,3.44695e-07,1.14227e-05,11,s,join
+A2_docs_to_str,before,200,time,3.2399e-05,4.99171e-07,3.14908e-05,11,s,s += in loop
+A2_docs_to_str,after,200,time,3.50943e-05,5.65963e-07,3.40147e-05,11,s,join
+A2_docs_to_str,before,800,time,0.000122423,2.01199e-06,0.000119639,11,s,s += in loop
+A2_docs_to_str,after,800,time,0.000129496,1.87159e-06,0.000127564,11,s,join
+A2_docs_to_str,before,3200,time,0.000492515,7.35706e-06,0.000483742,11,s,s += in loop
+A2_docs_to_str,after,3200,time,0.00051162,9.94711e-06,0.000496637,11,s,join
+A2_docs_to_str,before,12800,time,0.00215016,3.6953e-05,0.00207595,11,s,s += in loop
+A2_docs_to_str,after,12800,time,0.00219738,3.46681e-05,0.0021244,11,s,join
+B_jsonl,eager_read_jsonl,5000,peak_mem,18.1214,0,18.1214,3,MB,before/read_jsonl: full list in memory
+B_jsonl,lazy_iter_jsonl,5000,peak_mem,5.52132,6.53197e-06,5.52131,3,MB,after/iter_jsonl: streaming generator
+B_jsonl,eager_read_jsonl,5000,time,0.0464104,0.000728997,0.0457579,7,s,
+B_jsonl,lazy_iter_jsonl,5000,time,0.0363361,0.000196306,0.0360248,7,s,
+B_jsonl,eager_read_jsonl,20000,peak_mem,72.7262,0,72.7262,3,MB,before/read_jsonl: full list in memory
+B_jsonl,lazy_iter_jsonl,20000,peak_mem,21.9788,0,21.9788,3,MB,after/iter_jsonl: streaming generator
+B_jsonl,eager_read_jsonl,20000,time,0.219152,0.00159558,0.216219,7,s,
+B_jsonl,lazy_iter_jsonl,20000,time,0.162674,0.00122805,0.160484,7,s,
+B_jsonl,eager_read_jsonl,80000,peak_mem,291.107,0,291.107,3,MB,before/read_jsonl: full list in memory
+B_jsonl,lazy_iter_jsonl,80000,peak_mem,88.0432,0,88.0432,3,MB,after/iter_jsonl: streaming generator
+B_jsonl,eager_read_jsonl,80000,time,1.05556,0.00498033,1.05025,7,s,
+B_jsonl,lazy_iter_jsonl,80000,time,0.734009,0.00329758,0.72834,7,s,
+C_engine_struct,before,0,is_openai_branches,4,0,4,1,count,runtime backend branches in engine
+C_engine_struct,after,0,is_openai_branches,1,0,1,1,count,runtime backend branches in engine
+C_engine_struct,before,0,methods_to_edit_for_new_backend,3,0,3,1,count,"manual count: edit __init__, chat, complete"
+C_engine_struct,after,0,methods_to_edit_for_new_backend,0,0,0,1,count,"manual count: add class + 1 registry line, edit no method"
+C_engine_dispatch,after_facade,1,time,4.4357e-06,1.28088e-06,3.53623e-06,15,s,GenerationConfig + strategy dispatch
+C_engine_dispatch,before_monolithic,1,time,3.08597e-06,2.33094e-07,2.69525e-06,15,s,inline branch + SamplingParams
+C_engine_dispatch,after_facade,8,time,4.4619e-06,5.60691e-07,3.78676e-06,15,s,GenerationConfig + strategy dispatch
+C_engine_dispatch,before_monolithic,8,time,3.40454e-06,3.35629e-07,3.0864e-06,15,s,inline branch + SamplingParams
+C_engine_dispatch,after_facade,64,time,9.52644e-06,3.51215e-07,9.08785e-06,15,s,GenerationConfig + strategy dispatch
+C_engine_dispatch,before_monolithic,64,time,8.48286e-06,2.04466e-07,8.15652e-06,15,s,inline branch + SamplingParams

@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.DS_Store
+# import-time side-effect dirs created by common.py
+src/*/data/
+src/*/faiss_index/
+src/*/output/
+results/_tmp/
+.ipynb_checkpoints/

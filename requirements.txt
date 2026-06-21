@@ -1,0 +1,7 @@
+# Optimization / benchmark / report tooling (CPU only, no GPU).
+# The research pipeline's own deps (vllm, faiss, transformers, ...) live in
+# src/before/requirements.txt and src/after/requirements.txt and are NOT needed
+# to reproduce the benchmarks or rebuild the report.
+numpy>=1.26
+matplotlib>=3.7
+reportlab>=4.0
